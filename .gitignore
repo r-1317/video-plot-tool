@@ -1,0 +1,16 @@
+/test/
+/memo.md
+__pycache__/
+*.py[cod]
+*.kdenlive
+*.kdenlive.srt
+*.mov
+*.mp4
+*.mkv
+*.avi
+*.webm
+*.m4v
+*.mts
+*.wav
+*.mp3
+*.flac
