@@ -67,13 +67,14 @@ def clock_time(count: int, fps: Fraction) -> str:
     return f"{hours:02}:{minute:02}:{sec:02}.{ms:03}"
 
 
-def read_xml(path: Path) -> ET.ElementTree:
+def read_xml(path: Path, expected_root: str = "mlt") -> ET.ElementTree:
     try:
         tree = ET.parse(path)
     except ET.ParseError as error:
         raise ProjectError(f"XML を読み込めません: {path}: {error}") from error
-    if tree.getroot().tag != "mlt":
-        raise ProjectError(f"Kdenlive プロジェクトではありません: {path}")
+    if tree.getroot().tag != expected_root:
+        kind = ".kdenlivetitle タイトルクリップ" if expected_root == "kdenlivetitle" else "Kdenlive プロジェクト"
+        raise ProjectError(f"{kind}ではありません: {path}")
     return tree
 
 
@@ -242,7 +243,25 @@ def probe_media(path: Path, fps: Fraction, ffprobe: str) -> Media:
     return Media(path, length, video, audio)
 
 
-def title_template(project: Project, style_path: Path | None) -> ET.Element:
+def validate_title_template(project: Project, template: ET.Element) -> ET.Element:
+    if template.tag != "kdenlivetitle":
+        raise ProjectError("字幕見本は kdenlivetitle 形式である必要があります。")
+    if any(template.get(key) != project.profile.get(key) for key in ("width", "height")):
+        raise ProjectError("字幕見本と入力プロジェクトの解像度が異なります。")
+    contents = template.findall("item[@type='QGraphicsTextItem']/content")
+    if len(contents) != 1 or len(template.findall("item")) != 1:
+        raise ProjectError("字幕見本にはテキスト要素が 1 個だけ必要です。")
+    if list(contents[0]) or any("richtext" in key for key in contents[0].attrib):
+        raise ProjectError("リッチテキストの字幕見本には対応していません。プレーンテキストのタイトルを使ってください。")
+    return template
+
+
+def title_template(project: Project, style_path: Path | None,
+                   style_title_path: Path | None = None) -> ET.Element:
+    if style_path is not None and style_title_path is not None:
+        raise ProjectError("--style-project と --style-title は同時に指定できません。")
+    if style_title_path is not None:
+        return validate_title_template(project, read_xml(style_title_path, expected_root="kdenlivetitle").getroot())
     source = read_xml(style_path).getroot() if style_path else project.root
     candidates = []
     for producer in source.findall("producer"):
@@ -251,14 +270,7 @@ def title_template(project: Project, style_path: Path | None) -> ET.Element:
             candidates.append((int(name[2:]), producer))
     if candidates:
         template = ET.fromstring(prop(min(candidates, key=lambda item: item[0])[1], "xmldata"))
-        if any(template.get(key) != project.profile.get(key) for key in ("width", "height")):
-            raise ProjectError("字幕見本と入力プロジェクトの解像度が異なります。")
-        contents = template.findall("item[@type='QGraphicsTextItem']/content")
-        if len(contents) != 1 or len(template.findall("item")) != 1:
-            raise ProjectError("字幕見本にはテキスト要素が 1 個だけ必要です。")
-        if list(contents[0]) or any("richtext" in key for key in contents[0].attrib):
-            raise ProjectError("リッチテキストの字幕見本には対応していません。プレーンテキストのタイトルを使ってください。")
-        return template
+        return validate_title_template(project, template)
     if style_path:
         raise ProjectError("見本プロジェクトに『字幕001』などの番号付きタイトルがありません。")
     width, height = int(project.profile.get("width")), int(project.profile.get("height"))
@@ -430,7 +442,9 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("project", type=Path, help="配置先の空トラックを持つ .kdenlive ファイル")
     result.add_argument("--videos", type=Path, help="001_...mov などの番号付き動画のフォルダー")
     result.add_argument("--script", type=Path, help="1 行目が 001 に対応する台本")
-    result.add_argument("--style-project", type=Path, help="字幕001 の装飾を取得する見本プロジェクト")
+    style = result.add_mutually_exclusive_group()
+    style.add_argument("--style-project", type=Path, help="字幕001 の装飾を取得する見本プロジェクト")
+    style.add_argument("--style-title", type=Path, help="字幕の装飾を取得する .kdenlivetitle タイトルクリップ")
     result.add_argument("--output", "-o", type=Path, help="出力先（既定: 入力名-arranged.kdenlive）")
     result.add_argument("--video-track", default="立ち絵", help="映像トラックの名前・V番号・tractor ID（既定: 立ち絵）")
     result.add_argument("--audio-track", default="A2", help="音声トラックの名前・A番号・tractor ID（既定: A2）")
@@ -453,7 +467,7 @@ def run(args: argparse.Namespace) -> None:
     if args.videos is None or args.script is None:
         raise ProjectError("--videos と --script を指定してください。")
     output = (args.output or args.project.with_name(args.project.stem + "-arranged.kdenlive")).resolve()
-    protected = [args.project, args.script] + ([args.style_project] if args.style_project else [])
+    protected = [path for path in (args.project, args.script, args.style_project, args.style_title) if path is not None]
     if any(output == path.resolve() or (output.exists() and output.samefile(path)) for path in protected):
         raise ProjectError("出力先には入力ファイルと異なるパスを指定してください。")
     if output.suffix.lower() != ".kdenlive":
@@ -468,7 +482,7 @@ def run(args: argparse.Namespace) -> None:
     for track in (video_track, audio_track, subtitle_track):
         track.require_empty()
     inputs = read_inputs(args.videos, args.script, args.encoding)
-    template = title_template(project, args.style_project)
+    template = title_template(project, args.style_project, args.style_title)
     ffprobe = shutil.which(args.ffprobe)
     if ffprobe is None:
         raise ProjectError("ffprobe が見つかりません。FFmpeg をインストールするか --ffprobe で指定してください。")

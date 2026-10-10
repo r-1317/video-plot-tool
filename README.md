@@ -34,7 +34,22 @@ python3 plot_kdenlive.py input.kdenlive \
 
 出力ファイルを Kdenlive で開き、字幕の見た目や他の映像とのタイミングを確認してください。元のプロジェクトは上書きしません。出力先を省略すると、入力と同じフォルダーに `入力名-arranged.kdenlive` を作成します。既存の出力ファイルを置き換える場合は `--force` を付けます。
 
-装飾の見本となる番号付き字幕タイトルが別の Kdenlive プロジェクトにある場合は、`--style-project path/to/style.kdenlive` を指定できます。最初の「字幕001」などからフォント、色、縁取り、位置を引き継ぎます。見本と出力先の解像度は同じにしてください。見本を省略すると、入力プロジェクト内の番号付き字幕タイトルを探し、なければ白文字・黒縁の既定スタイルを使います。見本はテキスト要素が 1 個のプレーンテキストのタイトルに対応しています。
+字幕のフォント、色、縁取り、位置は、`.kdenlivetitle` 形式のタイトルクリップから引き継げます。Kdenlive のタイトルエディターで見本を保存し、`--style-title` で指定してください。
+
+```bash
+python3 plot_kdenlive.py input.kdenlive \
+  --videos path/to/videos \
+  --script path/to/dialogue.txt \
+  --video-track V2 \
+  --audio-track A2 \
+  --subtitle-track V4 \
+  --style-title path/to/subtitle.kdenlivetitle \
+  --output result.kdenlive
+```
+
+別の Kdenlive プロジェクトを見本にする場合は、`--style-project path/to/style.kdenlive` を指定できます。最初の「字幕001」などから装飾を取得します。`--style-title` と `--style-project` は同時に指定できません。
+
+見本と入力プロジェクトの解像度は同じにしてください。テキスト要素が 1 個のプレーンテキストのタイトルに対応しています。見本に入っている本文（`%s` など）は各セリフに置き換え、表示時間は動画に合わせます。見本を省略すると、入力プロジェクト内の番号付き字幕タイトルを探し、なければ白文字・黒縁の既定スタイルを使います。
 
 `--dry-run` では入力を検証し、各クリップの開始時刻とフレーム数を表示します。ファイルは作成しません。台本の文字コードを変更するには `--encoding cp932` などを指定します。`ffprobe` が PATH にない場合は `--ffprobe path/to/ffprobe` で指定できます。全オプションは `python3 plot_kdenlive.py --help` で確認できます。
 
@@ -48,6 +63,7 @@ python3 plot_kdenlive.py input.kdenlive \
 | `--videos DIR` | 番号付き動画があるフォルダー | 通常の配置では必須 |
 | `--script FILE` | 1 行目が 001 に対応する台本 | 通常の配置では必須 |
 | `--style-project FILE` | 字幕の装飾を取得する見本プロジェクト | 入力プロジェクト内の番号付き字幕を使い、なければ既定スタイルを使う |
+| `--style-title FILE` | 字幕の装飾を取得する `.kdenlivetitle` タイトルクリップ（`--style-project` と併用不可） | `--style-project` も未指定なら、入力プロジェクト内の番号付き字幕を使い、なければ既定スタイルを使う |
 | `--output FILE`, `-o FILE` | 出力する `.kdenlive` ファイル | 入力と同じフォルダーの `入力名-arranged.kdenlive` |
 | `--video-track TRACK` | 映像を配置するトラック | `立ち絵` |
 | `--audio-track TRACK` | 音声を配置するトラック | `A2` |
@@ -82,7 +98,7 @@ python3 -m unittest discover -s tests -v
 
 このリポジトリのコード、テスト、READMEは [MIT License](LICENSE) です。Copyright (c) 2026 r1317。
 
-このライセンスは利用者が入力する動画、音声、画像、台本、Kdenlive プロジェクトには適用されません。公開する際は、それらを配布できる権利を別途確認してください。このリポジトリでは、作業用サンプルを置く `test/` と、動画・音声・Kdenlive プロジェクトを Git の対象から除外しています。
+このライセンスは利用者が入力する動画、音声、画像、台本、Kdenlive プロジェクト、タイトルクリップには適用されません。公開する際は、それらを配布できる権利を別途確認してください。このリポジトリでは、作業用サンプルを置く `test/` と、動画・音声・Kdenlive プロジェクト・タイトルクリップを Git の対象から除外しています。
 
 Kdenlive と FFmpeg は本リポジトリに同梱しません。`ffprobe` は外部コマンドとして実行します。これらを別途再配布する場合は、それぞれのライセンスを確認してください。FFmpeg は構成により LGPL または GPL の条件が適用されます（[公式のライセンス説明](https://ffmpeg.org/legal.html)）。
 

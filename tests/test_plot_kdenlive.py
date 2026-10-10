@@ -2,6 +2,7 @@
 # Copyright (c) 2026 r1317
 
 import contextlib
+import copy
 from fractions import Fraction
 import io
 import json
@@ -225,34 +226,113 @@ class ArrangementTests(unittest.TestCase):
 
 
 class StyleTests(unittest.TestCase):
-    def test_style_from_separate_project_is_retained(self):
-        with tempfile.TemporaryDirectory() as directory:
-            directory = Path(directory)
-            target_path = directory / "target.kdenlive"
-            style_path = directory / "style.kdenlive"
-            fixture(target_path)
-            fixture(style_path)
-            style_root = ET.parse(style_path).getroot()
-            template = ET.Element("kdenlivetitle", width="3840", height="2160")
-            item = ET.SubElement(template, "item", type="QGraphicsTextItem")
-            ET.SubElement(item, "position", x="46", y="1790")
-            ET.SubElement(item, "content", font="Example Font", **{"font-color": "255,255,255,255", "box-width": "300"}).text = "old text"
-            title = ET.Element("producer", id="style-title")
-            app.set_prop(title, "kdenlive:clipname", "字幕001")
-            app.set_prop(title, "mlt_service", "kdenlivetitle")
-            app.set_prop(title, "xmldata", ET.tostring(template, encoding="unicode"))
-            style_root.insert(1, title)
-            ET.ElementTree(style_root).write(style_path, encoding="utf-8")
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.directory = Path(self.temp.name)
+        self.target_path = self.directory / "target.kdenlive"
+        fixture(self.target_path)
+        self.template = ET.Element("kdenlivetitle", width="3840", height="2160", duration="19", out="19")
+        item = ET.SubElement(self.template, "item", type="QGraphicsTextItem")
+        position = ET.SubElement(item, "position", x="46", y="1790")
+        ET.SubElement(position, "transform").text = "1,0,0,0,1,0,0,0,1"
+        ET.SubElement(item, "content", {
+            "font": "Example Font", "font-pixel-size": "113", "font-color": "255,255,255,255",
+            "font-outline": "12", "font-outline-color": "124,180,253,255",
+            "alignment": "1", "box-width": "300", "box-height": "242",
+        }).text = "%s\n"
+        self.title_path = self.directory / "subtitle.kdenlivetitle"
+        ET.ElementTree(self.template).write(self.title_path, encoding="utf-8")
 
-            target = app.Project(target_path)
-            extracted = app.title_template(target, style_path)
-            self.assertEqual(extracted.find("item/content").get("font"), "Example Font")
-            producer = app.make_title(target, extracted, "new text", 1, 90, target.bin_id())
-            result = ET.fromstring(app.prop(producer, "xmldata"))
-            self.assertEqual(result.find("item/content").text, "new text")
-            self.assertEqual(result.find("item/content").get("font"), "Example Font")
-            self.assertEqual(result.find("item/position").attrib, {"x": "46", "y": "1790"})
-            self.assertNotIn("box-width", result.find("item/content").attrib)
+    def cli_args(self, output):
+        video_dir = self.directory / "videos"
+        video_dir.mkdir()
+        self.video = video_dir / "001_video.mov"
+        self.video.touch()
+        script = self.directory / "dialogue.txt"
+        script.write_text("日本語 <字幕> & 記号\n", encoding="utf-8")
+        return app.parser().parse_args([
+            str(self.target_path), "--videos", str(video_dir), "--script", str(script),
+            "--style-title", str(self.title_path), "--output", str(output), "--force",
+        ])
+
+    def test_style_from_separate_project_is_retained(self):
+        style_path = self.directory / "style.kdenlive"
+        fixture(style_path)
+        style_root = ET.parse(style_path).getroot()
+        title = ET.Element("producer", id="style-title")
+        app.set_prop(title, "kdenlive:clipname", "字幕001")
+        app.set_prop(title, "mlt_service", "kdenlivetitle")
+        app.set_prop(title, "xmldata", ET.tostring(self.template, encoding="unicode"))
+        style_root.insert(1, title)
+        ET.ElementTree(style_root).write(style_path, encoding="utf-8")
+
+        target = app.Project(self.target_path)
+        extracted = app.title_template(target, style_path)
+        self.assertEqual(extracted.find("item/content").get("font"), "Example Font")
+        producer = app.make_title(target, extracted, "new text", 1, 90, target.bin_id())
+        result = ET.fromstring(app.prop(producer, "xmldata"))
+        self.assertEqual(result.find("item/content").text, "new text")
+        self.assertEqual(result.find("item/content").get("font"), "Example Font")
+        self.assertEqual(result.find("item/position").attrib, {"x": "46", "y": "1790"})
+        self.assertNotIn("box-width", result.find("item/content").attrib)
+
+    def test_title_clip_cli_preserves_style_and_replaces_text_and_duration(self):
+        original = self.title_path.read_bytes()
+        output = self.directory / "result.kdenlive"
+        args = self.cli_args(output)
+        with patch.object(app, "probe_media", return_value=media(self.video, 90)), \
+                patch.object(app.shutil, "which", return_value="ffprobe"), \
+                contextlib.redirect_stdout(io.StringIO()):
+            app.run(args)
+        root = ET.parse(output).getroot()
+        producers = [p for p in root.findall("producer") if app.prop(p, "mlt_service") == "kdenlivetitle"]
+        self.assertEqual(len(producers), 1)
+        title = ET.fromstring(app.prop(producers[0], "xmldata"))
+        self.assertEqual(title.find("item/content").text, "日本語 <字幕> & 記号")
+        for key in ("font", "font-pixel-size", "font-color", "font-outline", "font-outline-color", "alignment"):
+            self.assertEqual(title.find("item/content").get(key), self.template.find("item/content").get(key))
+        self.assertEqual(ET.tostring(title.find("item/position")), ET.tostring(self.template.find("item/position")))
+        self.assertEqual((title.get("duration"), title.get("out")), ("90", "89"))
+        self.assertEqual(producers[0].get("out"), "89")
+        self.assertNotIn("box-width", title.find("item/content").attrib)
+        self.assertEqual(self.title_path.read_bytes(), original)
+        assert_references(self, root)
+
+    def test_invalid_title_clips_rejected(self):
+        variants = []
+        wrong_root = copy.deepcopy(self.template)
+        wrong_root.tag = "mlt"
+        variants.append((ET.tostring(wrong_root), app.ProjectError, "タイトルクリップ"))
+        wrong_size = copy.deepcopy(self.template)
+        wrong_size.set("width", "1920")
+        variants.append((ET.tostring(wrong_size), app.ProjectError, "解像度"))
+        extra_item = copy.deepcopy(self.template)
+        ET.SubElement(extra_item, "item", type="QGraphicsRectItem")
+        variants.append((ET.tostring(extra_item), app.ProjectError, "1 個だけ"))
+        rich_text = copy.deepcopy(self.template)
+        rich_text.find("item/content").set("richtext", "html")
+        variants.append((ET.tostring(rich_text), app.ProjectError, "リッチテキスト"))
+        variants.append((b"<kdenlivetitle>", app.ProjectError, "XML"))
+        for data, error_type, message in variants:
+            with self.subTest(message=message):
+                self.title_path.write_bytes(data)
+                with self.assertRaisesRegex(error_type, message):
+                    app.title_template(app.Project(self.target_path), None, self.title_path)
+
+    def test_style_options_are_mutually_exclusive(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
+            app.parser().parse_args([str(self.target_path), "--style-project", "style.kdenlive", "--style-title", str(self.title_path)])
+        self.assertEqual(error.exception.code, 2)
+        with self.assertRaisesRegex(app.ProjectError, "同時に指定できません"):
+            app.title_template(app.Project(self.target_path), self.target_path, self.title_path)
+
+    def test_title_clip_cannot_be_overwritten(self):
+        original = self.title_path.read_bytes()
+        args = self.cli_args(self.title_path)
+        with self.assertRaisesRegex(app.ProjectError, "入力ファイルと異なる"):
+            app.run(args)
+        self.assertEqual(self.title_path.read_bytes(), original)
 
 
 if __name__ == "__main__":

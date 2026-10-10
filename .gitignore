@@ -3,6 +3,7 @@
 __pycache__/
 *.py[cod]
 *.kdenlive
+*.kdenlivetitle
 *.kdenlive.srt
 *.mov
 *.mp4
