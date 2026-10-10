@@ -38,6 +38,29 @@ python3 plot_kdenlive.py input.kdenlive \
 
 `--dry-run` では入力を検証し、各クリップの開始時刻とフレーム数を表示します。ファイルは作成しません。台本の文字コードを変更するには `--encoding cp932` などを指定します。`ffprobe` が PATH にない場合は `--ffprobe path/to/ffprobe` で指定できます。全オプションは `python3 plot_kdenlive.py --help` で確認できます。
 
+## オプション一覧
+
+入力プロジェクトは位置引数 `project` として指定します。通常の配置では `--videos` と `--script` も必須です。`--list-tracks` ではこの 2 つを省略できます。
+
+| 引数・オプション | 用途 | 既定値・省略時の動作 |
+| --- | --- | --- |
+| `project` | 配置先の空トラックを持つ `.kdenlive` ファイル | 必須の位置引数 |
+| `--videos DIR` | 番号付き動画があるフォルダー | 通常の配置では必須 |
+| `--script FILE` | 1 行目が 001 に対応する台本 | 通常の配置では必須 |
+| `--style-project FILE` | 字幕の装飾を取得する見本プロジェクト | 入力プロジェクト内の番号付き字幕を使い、なければ既定スタイルを使う |
+| `--output FILE`, `-o FILE` | 出力する `.kdenlive` ファイル | 入力と同じフォルダーの `入力名-arranged.kdenlive` |
+| `--video-track TRACK` | 映像を配置するトラック | `立ち絵` |
+| `--audio-track TRACK` | 音声を配置するトラック | `A2` |
+| `--subtitle-track TRACK` | 字幕を配置するトラック | `字幕` |
+| `--encoding ENCODING` | 台本の文字コード | `utf-8-sig`（UTF-8、BOM 可） |
+| `--ffprobe COMMAND` | `ffprobe` の実行ファイル名またはパス | `ffprobe`（PATH から探す） |
+| `--list-tracks` | トラック名・番号・ID・クリップ数を表示して終了 | 無効 |
+| `--dry-run` | 入力を検証し、配置予定だけを表示する | 無効 |
+| `--force` | 既存の出力ファイルを置き換える。入力ファイルは上書き不可 | 無効 |
+| `--help`, `-h` | ヘルプを表示して終了 | 無効 |
+
+`TRACK` はトラック名、`V2` / `A2` のような番号、または `--list-tracks` に表示される `tractor4` などの ID で指定できます。
+
 ## 配置時の扱い
 
 - 対象フォルダー内の番号付き動画を数値順に読みます。フォルダーは再帰的に検索しません。番号のない動画は無視します。
